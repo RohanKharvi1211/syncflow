@@ -22,10 +22,10 @@ func NewStagingTableService() *StagingTableService {
 func (sts *StagingTableService) CreateStagingTableIfNotExists(company *models.Company, dataObject *models.DataObject) (string, error) {
 	// Extract object name from config (file_name or sheet_name) or use identifier as fallback
 	objectName := sts.extractObjectName(dataObject)
-	
+
 	// Sanitize company name and object name for SQL table name
 	tableName := sts.generateTableName(company.Name, objectName)
-	
+
 	// Create table with JSONB column for flexible data storage
 	// Also include metadata columns for tracking
 	createTableSQL := fmt.Sprintf(`
@@ -62,7 +62,7 @@ func (sts *StagingTableService) extractObjectName(dataObject *models.DataObject)
 			}
 		}
 	}
-	
+
 	// Fallback to identifier (might be file ID for Google Sheets)
 	return dataObject.Identifier
 }
@@ -107,19 +107,19 @@ func (sts *StagingTableService) InsertDataIntoStagingTable(tableName string, rec
 func (sts *StagingTableService) generateTableName(companyName, objectIdentifier string) string {
 	// Sanitize: remove special characters, convert to lowercase, replace spaces with underscores
 	re := regexp.MustCompile(`[^a-zA-Z0-9_]`)
-	
+
 	sanitizedCompany := strings.ToLower(re.ReplaceAllString(companyName, "_"))
 	sanitizedObject := strings.ToLower(re.ReplaceAllString(objectIdentifier, "_"))
-	
+
 	// Remove consecutive underscores
 	reUnderscore := regexp.MustCompile(`_+`)
 	sanitizedCompany = reUnderscore.ReplaceAllString(sanitizedCompany, "_")
 	sanitizedObject = reUnderscore.ReplaceAllString(sanitizedObject, "_")
-	
+
 	// Trim underscores from start and end
 	sanitizedCompany = strings.Trim(sanitizedCompany, "_")
 	sanitizedObject = strings.Trim(sanitizedObject, "_")
-	
+
 	// Ensure table name doesn't start with a number
 	if len(sanitizedCompany) > 0 && sanitizedCompany[0] >= '0' && sanitizedCompany[0] <= '9' {
 		sanitizedCompany = "c_" + sanitizedCompany
@@ -127,14 +127,14 @@ func (sts *StagingTableService) generateTableName(companyName, objectIdentifier 
 	if len(sanitizedObject) > 0 && sanitizedObject[0] >= '0' && sanitizedObject[0] <= '9' {
 		sanitizedObject = "o_" + sanitizedObject
 	}
-	
+
 	// Limit length (PostgreSQL table name limit is 63 characters)
 	tableName := sanitizedCompany + "_" + sanitizedObject
 	if len(tableName) > 63 {
 		// Truncate if too long
 		tableName = tableName[:63]
 	}
-	
+
 	return tableName
 }
 
@@ -164,4 +164,3 @@ func (sts *StagingTableService) GetStagingTableData(tableName string, limit int)
 
 	return records, nil
 }
-

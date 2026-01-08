@@ -1,0 +1,22 @@
+{
+  "name": "authentication-web",
+  "version": "1.0.0",
+  "description": "Authentication domain web frontend",
+  "scripts": {
+    "preinstall": "cd ../core && npm install",
+    "prebuild": "cd ../core && npm run build",
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "dependencies": {
+    "authentication-core": "file:../core"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
+
+
+
+
+

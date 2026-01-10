@@ -35,6 +35,9 @@ COPY --from=builder /app/server .
 # Copy migration files
 COPY --from=builder /build/migrations ./migrations
 
+# Install wget for health checks (must be done as root)
+RUN apk --no-cache add wget
+
 # Create non-root user
 RUN addgroup -g 1000 appgroup && \
     adduser -D -u 1000 -G appgroup appuser && \
@@ -44,9 +47,6 @@ USER appuser
 
 # Expose port (default 8080, configurable via PORT env var)
 EXPOSE 8080
-
-# Install wget for health checks
-RUN apk --no-cache add wget
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

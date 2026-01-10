@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"syncflow-backend/cmd/app/middlewares"
 	"syncflow-backend/internal/config"
 	"syncflow-backend/internal/controllers"
@@ -39,6 +40,7 @@ func (app *App) newDatabaseConnection(cfg *config.Config) {
 		sslMode = "require" // Use SSL for RDS and other remote databases
 	}
 	
+	// First, try to connect to the target database
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
 		cfg.Database.Host,
 		cfg.Database.User,
@@ -50,7 +52,55 @@ func (app *App) newDatabaseConnection(cfg *config.Config) {
 
 	app.db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		panic(fmt.Errorf("db initialization failed: %w", err))
+		// If database doesn't exist, try to create it
+		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "3D000") {
+			fmt.Printf("Database '%s' does not exist. Attempting to create it...\n", cfg.Database.Name)
+			
+			// Connect to default 'postgres' database to create the target database
+			defaultDSN := fmt.Sprintf("host=%s user=%s password=%s dbname=postgres port=%s sslmode=%s",
+				cfg.Database.Host,
+				cfg.Database.User,
+				cfg.Database.Password,
+				cfg.Database.Port,
+				sslMode,
+			)
+			
+			defaultDB, dbErr := gorm.Open(postgres.Open(defaultDSN), &gorm.Config{})
+			if dbErr != nil {
+				panic(fmt.Errorf("failed to connect to default 'postgres' database to create '%s': %w", cfg.Database.Name, dbErr))
+			}
+			
+			// Create the database
+			createDBQuery := fmt.Sprintf("CREATE DATABASE %s", cfg.Database.Name)
+			if execErr := defaultDB.Exec(createDBQuery).Error; execErr != nil {
+				// If database already exists (race condition), try connecting again
+				if strings.Contains(execErr.Error(), "already exists") || strings.Contains(execErr.Error(), "duplicate") {
+					fmt.Printf("Database '%s' was created by another process. Retrying connection...\n", cfg.Database.Name)
+					app.db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+					if err != nil {
+						panic(fmt.Errorf("db initialization failed after database creation: %w", err))
+					}
+					// Connection successful, continue to UUID extension below
+				} else {
+					panic(fmt.Errorf("failed to create database '%s': %w", cfg.Database.Name, execErr))
+				}
+			} else {
+				fmt.Printf("✓ Database '%s' created successfully\n", cfg.Database.Name)
+				// Now connect to the newly created database
+				app.db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+				if err != nil {
+					panic(fmt.Errorf("db initialization failed after creating database: %w", err))
+				}
+			}
+			
+			// Close the default DB connection (we're done with it)
+			// GORM manages connection pooling, but we can still close the underlying connection
+			if sqlDB, sqlErr := defaultDB.DB(); sqlErr == nil {
+				sqlDB.Close()
+			}
+		} else {
+			panic(fmt.Errorf("db initialization failed: %w", err))
+		}
 	}
 
 	// Set global DB for backward compatibility (used by controllers)

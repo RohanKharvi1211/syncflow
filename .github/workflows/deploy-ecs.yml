@@ -228,6 +228,13 @@ jobs:
       - name: Download existing task definition
         id: task-def-frontend
         run: |
+          # Verify secrets are set
+          if [ -z "${{ secrets.ECS_TASK_EXECUTION_ROLE_ARN }}" ] || [ -z "${{ secrets.ECS_TASK_ROLE_ARN }}" ]; then
+            echo "❌ ERROR: ECS_TASK_EXECUTION_ROLE_ARN or ECS_TASK_ROLE_ARN secrets are not set!"
+            echo "   Please set these secrets in GitHub repository settings."
+            exit 1
+          fi
+          
           aws ecs describe-task-definition \
             --task-definition ${{ env.ECS_TASK_DEFINITION_FRONTEND }} \
             --query taskDefinition > task-definition-frontend.json 2>/dev/null || echo "Task definition does not exist, will create new one"
@@ -272,6 +279,11 @@ jobs:
             ]
           }
           EOF
+          else
+            # Update existing task definition with secrets if they're placeholders
+            sed -i.bak "s|arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole|${{ secrets.ECS_TASK_EXECUTION_ROLE_ARN }}|g" task-definition-frontend.json
+            sed -i.bak "s|arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskRole|${{ secrets.ECS_TASK_ROLE_ARN }}|g" task-definition-frontend.json
+            rm -f task-definition-frontend.json.bak 2>/dev/null || true
           fi
 
       - name: Fill in the new image ID in the Amazon ECS task definition
@@ -362,24 +374,54 @@ jobs:
         run: |
           echo "📦 Service doesn't exist. Registering task definition and creating service..."
           
+          # Verify rendered task definition exists and has valid role ARNs
+          TASK_DEF_FILE="${{ steps.render-task-def-frontend.outputs.task-definition }}"
+          if [ ! -f "$TASK_DEF_FILE" ]; then
+            echo "❌ Task definition file not found: $TASK_DEF_FILE"
+            echo "   Cannot create service without task definition."
+            exit 0
+          fi
+          
+          # Check if role ARNs are valid (not placeholders)
+          if grep -q "YOUR_ACCOUNT_ID\|YOUR_ECR_REGISTRY" "$TASK_DEF_FILE"; then
+            echo "❌ Task definition contains placeholder values. Secrets may not be set."
+            echo "   ExecutionRoleArn and TaskRoleArn must be valid ARNs."
+            cat "$TASK_DEF_FILE" | grep -E "executionRoleArn|taskRoleArn" || true
+            exit 0
+          fi
+          
           # Register task definition (retry up to 3 times)
           TASK_DEF_ARN=""
           for i in 1 2 3; do
-            if REGISTER_OUTPUT=$(aws ecs register-task-definition \
-              --cli-input-json file://${{ steps.render-task-def-frontend.outputs.task-definition }} \
-              --region $AWS_REGION 2>&1); then
-              TASK_DEF_ARN=$(echo "$REGISTER_OUTPUT" | grep -oP 'taskDefinitionArn":\s*"\K[^"]+' | head -1 || echo "")
+            echo "Attempt $i: Registering task definition..."
+            REGISTER_OUTPUT=$(aws ecs register-task-definition \
+              --cli-input-json file://"$TASK_DEF_FILE" \
+              --region $AWS_REGION 2>&1) || REGISTER_ERROR="$REGISTER_OUTPUT"
+            
+            if [ $? -eq 0 ]; then
+              # Extract task definition ARN from output
+              TASK_DEF_ARN=$(echo "$REGISTER_OUTPUT" | grep -oE 'arn:aws:ecs:[^"]+task-definition/[^"]+' | head -1 || echo "")
               if [ -n "$TASK_DEF_ARN" ]; then
                 echo "✓ Task definition registered: $TASK_DEF_ARN"
                 break
               fi
+            else
+              echo "⚠️  Registration failed: $REGISTER_ERROR"
+              if echo "$REGISTER_ERROR" | grep -q "Role is not valid"; then
+                echo "❌ IAM Role ARN is invalid. Check if secrets ECS_TASK_EXECUTION_ROLE_ARN and ECS_TASK_ROLE_ARN are set correctly."
+                exit 0  # Don't retry if role is invalid
+              fi
             fi
-            echo "⚠️  Attempt $i failed, retrying..."
-            sleep $((i * 2))
+            if [ $i -lt 3 ]; then
+              echo "Retrying in $((i * 2)) seconds..."
+              sleep $((i * 2))
+            fi
           done
           
           if [ -z "$TASK_DEF_ARN" ]; then
-            echo "⚠️  Failed to register task definition. Cannot create service."
+            echo "❌ Failed to register task definition after 3 attempts."
+            echo "   Error details: $REGISTER_ERROR"
+            echo "   Cannot create service without task definition."
             exit 0
           fi
           

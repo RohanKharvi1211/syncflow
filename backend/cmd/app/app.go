@@ -33,12 +33,19 @@ type App struct {
 
 func (app *App) newDatabaseConnection(cfg *config.Config) {
 	var err error
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+	// For RDS, use sslmode=require. For local dev, use sslmode=disable
+	sslMode := "disable" // Default for local development
+	if cfg.Database.Host != "localhost" && cfg.Database.Host != "127.0.0.1" {
+		sslMode = "require" // Use SSL for RDS and other remote databases
+	}
+	
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
 		cfg.Database.Host,
 		cfg.Database.User,
 		cfg.Database.Password,
 		cfg.Database.Name,
 		cfg.Database.Port,
+		sslMode,
 	)
 
 	app.db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})

@@ -18,12 +18,20 @@ func ConnectDatabase() {
 
 	// Database connection string - using environment variables directly
 	// Note: This function should ideally receive Config struct, but kept for backward compatibility
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
-		getEnv("DB_HOST", "localhost"),
+	// For RDS, use sslmode=require. For local dev, use sslmode=disable
+	dbHost := getEnv("DB_HOST", "localhost")
+	sslMode := "disable" // Default for local development
+	if dbHost != "localhost" && dbHost != "127.0.0.1" {
+		sslMode = "require" // Use SSL for RDS and other remote databases
+	}
+
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
+		dbHost,
 		getEnv("DB_USER", "postgres"),
 		getEnv("DB_PASSWORD", "password"),
 		getEnv("DB_NAME", "syncflow"),
 		getEnv("DB_PORT", "5432"),
+		sslMode,
 	)
 
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{

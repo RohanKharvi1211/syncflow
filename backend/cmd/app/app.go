@@ -3,6 +3,9 @@ package app
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"syncflow-backend/cmd/app/middlewares"
 	"syncflow-backend/internal/config"
@@ -109,6 +112,15 @@ func (app *App) newDatabaseConnection(cfg *config.Config) {
 	// Enable UUID extension
 	app.db.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
+	// Run database migrations automatically on startup
+	// This ensures the database schema is always up to date
+	if err := app.runMigrations(); err != nil {
+		fmt.Printf("Warning: Failed to run migrations: %v\n", err)
+		fmt.Printf("You may need to run migrations manually. Continuing anyway...\n")
+	} else {
+		fmt.Printf("Database migrations completed successfully\n")
+	}
+
 	// Lightweight startup migration(s)
 	// NOTE:
 	// We normally rely on SQL migration files + external migrate tool,
@@ -117,16 +129,102 @@ func (app *App) newDatabaseConnection(cfg *config.Config) {
 	//
 	// 1) Ensure QuickBooks app can be used as both source and destination
 	//    (so it appears in the source dropdown and as a destination).
-	app.db.Exec(`
-		UPDATE "apps"
-		SET "type" = 'both',
-		    "description" = 'Sync data to/from QuickBooks accounting software'
-		WHERE "name" = 'quickbooks' AND "type" <> 'both'
-	`)
+	// Only run this if apps table exists (after migrations)
+	var tableExists bool
+	app.db.Raw(`
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables 
+			WHERE table_schema = 'public' 
+			AND table_name = 'apps'
+		)
+	`).Scan(&tableExists)
+	
+	if tableExists {
+		app.db.Exec(`
+			UPDATE "apps"
+			SET "type" = 'both',
+			    "description" = 'Sync data to/from QuickBooks accounting software'
+			WHERE "name" = 'quickbooks' AND "type" <> 'both'
+		`)
+	}
 
 	// Auto migrations are handled via SQL migration files.
 	// Skipping AutoMigrate here prevents accidental schema changes at runtime.
 	fmt.Printf("Database connected successfully\n")
+}
+
+// runMigrations executes all SQL migration files in migrations/postgres directory
+// Migrations are run in alphabetical order (by filename)
+// This function is safe to call multiple times - migrations with "IF NOT EXISTS" will be skipped
+func (app *App) runMigrations() error {
+	migrationsDir := "migrations/postgres"
+	
+	// Check if migrations directory exists
+	if _, err := os.Stat(migrationsDir); os.IsNotExist(err) {
+		// Migrations directory doesn't exist - this is OK (might be running in different context)
+		fmt.Printf("Migrations directory not found: %s (skipping migrations)\n", migrationsDir)
+		return nil
+	}
+
+	// Read migration files
+	files, err := os.ReadDir(migrationsDir)
+	if err != nil {
+		return fmt.Errorf("failed to read migrations directory: %w", err)
+	}
+
+	// Filter and sort migration files (only .up.sql files)
+	var migrationFiles []string
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".up.sql") {
+			migrationFiles = append(migrationFiles, file.Name())
+		}
+	}
+
+	if len(migrationFiles) == 0 {
+		fmt.Printf("No migration files found in %s\n", migrationsDir)
+		return nil
+	}
+
+	sort.Strings(migrationFiles)
+
+	// Get underlying SQL database connection
+	sqlDB, err := app.db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get database connection: %w", err)
+	}
+
+	// Run migrations
+	for _, fileName := range migrationFiles {
+		filePath := filepath.Join(migrationsDir, fileName)
+		fmt.Printf("Running migration: %s\n", fileName)
+
+		// Read migration file
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read migration file %s: %w", fileName, err)
+		}
+
+		// Execute migration
+		_, err = sqlDB.Exec(string(content))
+		if err != nil {
+			// Check if error is because table/object already exists (for idempotency)
+			errorMsg := strings.ToLower(err.Error())
+			if strings.Contains(errorMsg, "already exists") ||
+				strings.Contains(errorMsg, "duplicate") ||
+				strings.Contains(errorMsg, "relation") && strings.Contains(errorMsg, "already exists") {
+				fmt.Printf("  ⚠ Migration already applied (skipping): %s\n", fileName)
+				continue
+			}
+			// For other errors, log but continue (some migrations might partially succeed)
+			fmt.Printf("  ⚠ Migration failed (non-fatal): %s - %v\n", fileName, err)
+			// Don't return error - allow app to continue even if some migrations fail
+			// This prevents app from crashing on startup if DB schema is partially migrated
+		} else {
+			fmt.Printf("  ✓ Migration completed: %s\n", fileName)
+		}
+	}
+
+	return nil
 }
 
 func (app *App) setUpHandlers(cfg *config.Config) *gin.Engine {

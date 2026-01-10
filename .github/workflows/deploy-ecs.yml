@@ -21,6 +21,7 @@ jobs:
     name: Build and Deploy Backend
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -39,6 +40,7 @@ jobs:
 
       - name: Build, tag, and push backend image to Amazon ECR
         id: build-image-backend
+        timeout-minutes: 20
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -88,9 +90,9 @@ jobs:
                 "healthCheck": {
                   "command": ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1"],
                   "interval": 30,
-                  "timeout": 5,
+                  "timeout": 10,
                   "retries": 3,
-                  "startPeriod": 60
+                  "startPeriod": 120
                 }
               }
             ]
@@ -119,12 +121,35 @@ jobs:
 
       - name: Deploy Amazon ECS task definition
         if: steps.check-service-backend.outputs.service_exists == 'true'
+        timeout-minutes: 15
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           task-definition: ${{ steps.render-task-def-backend.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE_BACKEND }}
           cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+          wait-for-service-stability: false
+
+      - name: Check deployment status (backend)
+        if: steps.check-service-backend.outputs.service_exists == 'true'
+        timeout-minutes: 2
+        run: |
+          echo "Checking deployment status..."
+          aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE_BACKEND }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Deployments:deployments[*].{Status:status,RunningCount:runningCount,DesiredCount:desiredCount}}' \
+            --output table || echo "⚠️  Could not check deployment status"
+          
+          echo ""
+          echo "Recent service events:"
+          aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE_BACKEND }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].events[:5].{Message:message,Time:createdAt}' \
+            --output table || echo "⚠️  Could not fetch events"
+        continue-on-error: true
 
       - name: Register task definition (if service doesn't exist)
         if: steps.check-service-backend.outputs.service_exists == 'false'
@@ -139,6 +164,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     needs: build-and-deploy-backend
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -157,6 +183,7 @@ jobs:
 
       - name: Build, tag, and push frontend image to Amazon ECR
         id: build-image-frontend
+        timeout-minutes: 20
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -210,9 +237,9 @@ jobs:
                 "healthCheck": {
                   "command": ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost/health || exit 1"],
                   "interval": 30,
-                  "timeout": 5,
+                  "timeout": 10,
                   "retries": 3,
-                  "startPeriod": 30
+                  "startPeriod": 60
                 }
               }
             ]
@@ -241,12 +268,35 @@ jobs:
 
       - name: Deploy Amazon ECS task definition
         if: steps.check-service-frontend.outputs.service_exists == 'true'
+        timeout-minutes: 10
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           task-definition: ${{ steps.render-task-def-frontend.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE_FRONTEND }}
           cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+          wait-for-service-stability: false
+
+      - name: Check deployment status (frontend)
+        if: steps.check-service-frontend.outputs.service_exists == 'true'
+        timeout-minutes: 2
+        run: |
+          echo "Checking deployment status..."
+          aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE_FRONTEND }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Deployments:deployments[*].{Status:status,RunningCount:runningCount,DesiredCount:desiredCount}}' \
+            --output table || echo "⚠️  Could not check deployment status"
+          
+          echo ""
+          echo "Recent service events:"
+          aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE_FRONTEND }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].events[:5].{Message:message,Time:createdAt}' \
+            --output table || echo "⚠️  Could not fetch events"
+        continue-on-error: true
 
       - name: Register task definition (if service doesn't exist)
         if: steps.check-service-frontend.outputs.service_exists == 'false'

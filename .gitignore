@@ -31,3 +31,11 @@ go.work
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+*.env

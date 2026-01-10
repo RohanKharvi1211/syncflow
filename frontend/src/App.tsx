@@ -13,6 +13,7 @@ import { IntegrationsPage } from './pages/IntegrationsPage';
 import { OAuthCallbackPage } from './pages/OAuthCallbackPage';
 import { OAuthErrorPage } from './pages/OAuthErrorPage';
 import { SelectSheetPage } from './pages/SelectSheetPage';
+import { SelectQuickBooksObjectPage } from './pages/SelectQuickBooksObjectPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,11 +27,16 @@ const queryClient = new QueryClient({
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore();
 
-  if (isLoading) {
+  // Check localStorage as fallback in case store hasn't updated yet
+  const storedUser = localStorage.getItem('user');
+  const storedToken = localStorage.getItem('auth_token');
+  const hasAuth = isAuthenticated || (storedUser && storedToken);
+
+  if (isLoading && !hasAuth) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
 
-  if (!isAuthenticated) {
+  if (!hasAuth) {
     return <Navigate to="/login" replace />;
   }
 
@@ -70,11 +76,11 @@ function App() {
             />
             <Route
               path="/connections/select-sheet"
-              element={
-                <PrivateRoute>
-                  <SelectSheetPage />
-                </PrivateRoute>
-              }
+              element={<SelectSheetPage />}
+            />
+            <Route
+              path="/connections/select-quickbooks-object"
+              element={<SelectQuickBooksObjectPage />}
             />
             <Route
               path="/pipelines"

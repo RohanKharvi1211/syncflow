@@ -11,6 +11,7 @@ import { httpClient } from '@shared/adapters/httpClient';
 import { Connection } from '@domains/connections/entities/Connection';
 import { DataObject } from '@domains/pipelines/entities/Pipeline';
 import { App } from '@domains/apps/entities/App';
+import { QuickBooksCredentialsModal } from '@shared/components/QuickBooksCredentialsModal';
 
 type Step = 1 | 2 | 3;
 
@@ -65,11 +66,10 @@ export function CreatePipelinePage() {
   const [destinationConnection, setDestinationConnection] = useState<Connection | null>(null);
   const [sourceDataObject, setSourceDataObject] = useState<DataObject | null>(null);
   const [destinationDataObject, setDestinationDataObject] = useState<DataObject | null>(null);
-  const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([
-    { source: 'Name', destination: 'Account Name' },
-    { source: 'Email', destination: 'Account Email' },
-    { source: 'Amount', destination: 'Annual Revenue' },
-  ]);
+  const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
+  const [showQuickBooksModal, setShowQuickBooksModal] = useState(false);
+  const [pendingQuickBooksApp, setPendingQuickBooksApp] = useState<App | null>(null);
+  const [pendingIsSource, setPendingIsSource] = useState(false);
 
   const companyId = selectedCompany?.id || user?.company_id || '';
 
@@ -80,26 +80,55 @@ export function CreatePipelinePage() {
     { enabled: !!companyId }
   );
 
-  // Check if returning from sheet selection
+  // Check if returning from sheet selection - handle both source and destination
   useEffect(() => {
     const sourceConnectionId = searchParams.get('source_connection_id');
     const sourceDataObjectId = searchParams.get('source_data_object_id');
+    const destinationConnectionId = searchParams.get('destination_connection_id');
+    const destinationDataObjectId = searchParams.get('destination_data_object_id');
     
+    // Restore source connection and data object
     if (sourceConnectionId && connections) {
       const conn = connections.find(c => c.id === sourceConnectionId);
       if (conn) {
         setSourceConnection(conn);
         
-        // If we also have a data object ID, load it
         if (sourceDataObjectId) {
           dataObjectApi.getDataObject(sourceDataObjectId).then(obj => {
             setSourceDataObject(obj);
-            setStep(2); // Move to destination selection step
           }).catch(err => {
-            console.error('Failed to load data object:', err);
+            console.error('Failed to load source data object:', err);
           });
         }
       }
+    }
+    
+    // Restore destination connection and data object
+    if (destinationConnectionId && connections) {
+      const conn = connections.find(c => c.id === destinationConnectionId);
+      if (conn) {
+        setDestinationConnection(conn);
+        
+        if (destinationDataObjectId) {
+          dataObjectApi.getDataObject(destinationDataObjectId).then(obj => {
+            setDestinationDataObject(obj);
+          }).catch(err => {
+            console.error('Failed to load destination data object:', err);
+          });
+        }
+      }
+    }
+    
+    // Determine step based on what's selected
+    if (sourceConnectionId && sourceDataObjectId) {
+      if (destinationConnectionId && destinationDataObjectId) {
+        setStep(3); // Both source and destination selected - move to mapping step
+      } else {
+        setStep(2); // Only source selected - move to destination selection step
+      }
+    } else if (destinationConnectionId && destinationDataObjectId) {
+      // Only destination selected (shouldn't happen normally, but handle it)
+      setStep(2);
     }
   }, [searchParams, connections]);
 
@@ -118,9 +147,18 @@ export function CreatePipelinePage() {
     // For Google apps, initiate OAuth
     if (app.name === 'googlesheet' || app.name === 'googledrive') {
       try {
-        // Include return_to parameter to know we're coming from pipeline creation
-        const returnTo = isSource ? 'pipeline' : 'connections';
-        const response = await fetch(`http://localhost:8080/api/oauth/google/initiate?user_id=temp&return_to=${returnTo}&app_id=${app.id}`);
+        // Always use 'pipeline' as return_to when coming from pipeline creation
+        // Include is_source in the URL to distinguish between source and destination
+        const isSourceParam = isSource ? 'true' : 'false';
+        // Store current selections in sessionStorage to preserve them after OAuth
+        sessionStorage.setItem('pipeline_source_connection_id', sourceConnection?.id || '');
+        sessionStorage.setItem('pipeline_source_data_object_id', sourceDataObject?.id || '');
+        sessionStorage.setItem('pipeline_destination_connection_id', destinationConnection?.id || '');
+        sessionStorage.setItem('pipeline_destination_data_object_id', destinationDataObject?.id || '');
+        sessionStorage.setItem('pipeline_step', step.toString());
+        sessionStorage.setItem('pipeline_is_source', isSourceParam);
+        
+        const response = await fetch(`http://localhost:8080/api/oauth/google/initiate?user_id=temp&return_to=pipeline&app_id=${app.id}&is_source=${isSourceParam}`);
         const data = await response.json();
         if (data.auth_url) {
           window.location.href = data.auth_url;
@@ -128,6 +166,11 @@ export function CreatePipelinePage() {
       } catch (error) {
         console.error('Failed to initiate OAuth:', error);
       }
+    } else if (app.name === 'quickbooks') {
+      // For QuickBooks, show credentials modal first
+      setPendingQuickBooksApp(app);
+      setPendingIsSource(isSource);
+      setShowQuickBooksModal(true);
     } else {
       alert(`Connection setup for ${app.display_name} is not yet implemented`);
     }
@@ -146,13 +189,14 @@ export function CreatePipelinePage() {
     }
   }, [sourceDataObject, destinationDataObject, step]);
 
-  // Fetch headers for source and destination sheets
-  const { data: sourceHeaders, error: sourceHeadersError, refetch: refetchSourceHeaders, isFetching: isFetchingSourceHeaders } = useQuery<string[]>(
-    ['sheetHeaders', 'source', sourceDataObject?.id],
+  // Fetch fields for source and destination data objects
+  // Using new generic /data-objects/:id/fields endpoint that works for both Google Sheets and QuickBooks
+  const { data: sourceFields, error: sourceFieldsError, refetch: refetchSourceFields, isFetching: isFetchingSourceFields } = useQuery<string[]>(
+    ['dataObjectFields', 'source', sourceDataObject?.id],
     () => {
       if (!sourceDataObject?.id) return Promise.resolve([]);
-      return httpClient.get<{ headers: string[] }>(`/google-sheets/headers?data_object_id=${sourceDataObject.id}`)
-        .then(res => res.headers)
+      return httpClient.get<{ fields: string[] }>(`/data-objects/${sourceDataObject.id}/fields`)
+        .then(res => res.fields)
         .catch((error: any) => {
           // Re-throw to let React Query handle it
           throw error;
@@ -161,12 +205,12 @@ export function CreatePipelinePage() {
     { enabled: !!sourceDataObject?.id && step === 3, retry: false }
   );
 
-  const { data: destinationHeaders, error: destinationHeadersError, refetch: refetchDestinationHeaders, isFetching: isFetchingDestinationHeaders } = useQuery<string[]>(
-    ['sheetHeaders', 'destination', destinationDataObject?.id],
+  const { data: destinationFields, error: destinationFieldsError, refetch: refetchDestinationFields, isFetching: isFetchingDestinationFields } = useQuery<string[]>(
+    ['dataObjectFields', 'destination', destinationDataObject?.id],
     () => {
       if (!destinationDataObject?.id) return Promise.resolve([]);
-      return httpClient.get<{ headers: string[] }>(`/google-sheets/headers?data_object_id=${destinationDataObject.id}`)
-        .then(res => res.headers)
+      return httpClient.get<{ fields: string[] }>(`/data-objects/${destinationDataObject.id}/fields`)
+        .then(res => res.fields)
         .catch((error: any) => {
           // Re-throw to let React Query handle it
           throw error;
@@ -175,31 +219,31 @@ export function CreatePipelinePage() {
     { enabled: !!destinationDataObject?.id && step === 3, retry: false }
   );
 
-  // Retry function to refetch both headers
+  // Retry function to refetch both fields
   const handleRetry = () => {
     if (sourceDataObject?.id) {
-      refetchSourceHeaders();
+      refetchSourceFields();
     }
     if (destinationDataObject?.id) {
-      refetchDestinationHeaders();
+      refetchDestinationFields();
     }
   };
 
-  // Initialize field mappings when headers are loaded
+  // Initialize field mappings when fields are loaded
+  // Mapping direction: destination → source (which destination field uses which source field)
   useEffect(() => {
-    if (step === 3 && sourceHeaders && sourceHeaders.length > 0 && destinationHeaders && destinationHeaders.length > 0) {
-      // Only initialize if we still have the default mappings or empty
-      const hasDefaults = fieldMappings.length === 0 || fieldMappings.some(m => m.source === 'Name' || m.source === 'Email');
-      if (hasDefaults && fieldMappings.length === 0) {
-        // Initialize with empty mappings for each source header
-        const initialMappings = sourceHeaders.slice(0, Math.min(sourceHeaders.length, 5)).map(header => ({
-          source: header,
-          destination: ''
-        }));
-        setFieldMappings(initialMappings);
-      }
+    // Only initialize when we reach step 3 and both source and destination fields are loaded
+    // Only initialize once when fields first become available (when fieldMappings is empty)
+    if (step === 3 && destinationFields && destinationFields.length > 0 && sourceFields && sourceFields.length > 0 && fieldMappings.length === 0) {
+      // Initialize with empty mappings for all destination fields
+      // Each mapping represents: destination field → source field (what source field should fill this destination field)
+      const initialMappings = destinationFields.map(destField => ({
+        destination: destField, // Destination field (e.g., Google Sheet column header)
+        source: '' // Source field (e.g., QuickBooks Invoice field) - user will select
+      }));
+      setFieldMappings(initialMappings);
     }
-  }, [step, sourceHeaders, destinationHeaders]);
+  }, [step, destinationFields, sourceFields, fieldMappings.length]);
 
   const createPipelineMutation = useMutation(
     (data: any) => pipelineApi.createPipeline(data),
@@ -575,32 +619,43 @@ export function CreatePipelinePage() {
         {step === 3 && (
           <div className="mt-8 pt-8 border-t">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Data Mapping</h2>
-            {sourceHeaders && destinationHeaders ? (
+            {sourceFields && destinationFields ? (
               <div className="space-y-3">
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-800">
+                    <strong>Mapping Direction:</strong> For each destination field, select which source field should populate it.
+                  </p>
+                </div>
                 {fieldMappings.map((mapping, index) => (
                   <div key={index} className="flex items-center space-x-3">
-                    <select
-                      value={mapping.source}
-                      onChange={(e) => updateFieldMapping(index, 'source', e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500"
-                    >
-                      <option value="">Select source field...</option>
-                      {sourceHeaders.map((header) => (
-                        <option key={header} value={header}>
-                          {header}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="text-gray-500 text-xl">→</span>
+                    <label className="text-sm font-medium text-gray-700 w-32">
+                      Destination:
+                    </label>
                     <select
                       value={mapping.destination}
                       onChange={(e) => updateFieldMapping(index, 'destination', e.target.value)}
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500"
                     >
                       <option value="">Select destination field...</option>
-                      {destinationHeaders.map((header) => (
-                        <option key={header} value={header}>
-                          {header}
+                      {destinationFields.map((field) => (
+                        <option key={field} value={field}>
+                          {field}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-gray-500 text-xl">←</span>
+                    <label className="text-sm font-medium text-gray-700 w-24">
+                      Source:
+                    </label>
+                    <select
+                      value={mapping.source}
+                      onChange={(e) => updateFieldMapping(index, 'source', e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-primary-500 focus:border-primary-500"
+                    >
+                      <option value="">Select source field...</option>
+                      {sourceFields.map((field) => (
+                        <option key={field} value={field}>
+                          {field}
                         </option>
                       ))}
                     </select>
@@ -621,14 +676,14 @@ export function CreatePipelinePage() {
               </div>
             ) : (
               <div className="text-center py-8">
-                {!sourceHeaders && !destinationHeaders && !sourceHeadersError && !destinationHeadersError ? (
-                  <div className="text-gray-500">Loading headers...</div>
+                {!sourceFields && !destinationFields && !sourceFieldsError && !destinationFieldsError ? (
+                  <div className="text-gray-500">Loading fields...</div>
                 ) : (
                   <div className="max-w-2xl mx-auto">
-                    {(sourceHeadersError || destinationHeadersError) && (
+                    {(sourceFieldsError || destinationFieldsError) && (
                       <div className="bg-red-50 border border-red-200 rounded-lg p-6">
                         {(() => {
-                          const error = sourceHeadersError || destinationHeadersError;
+                          const error = sourceFieldsError || destinationFieldsError;
                           // httpClient interceptor now preserves all error data
                           const errorData = (error as any) || {};
                           
@@ -686,10 +741,10 @@ export function CreatePipelinePage() {
                                 <div className="flex flex-col sm:flex-row gap-3 justify-center mt-4">
                                   <button
                                     onClick={handleRetry}
-                                    disabled={isFetchingSourceHeaders || isFetchingDestinationHeaders}
+                                    disabled={isFetchingSourceFields || isFetchingDestinationFields}
                                     className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
-                                    {isFetchingSourceHeaders || isFetchingDestinationHeaders ? 'Retrying...' : '🔄 Retry'}
+                                    {isFetchingSourceFields || isFetchingDestinationFields ? 'Retrying...' : '🔄 Retry'}
                                   </button>
                                 </div>
                               </div>
@@ -698,7 +753,7 @@ export function CreatePipelinePage() {
                           
                           return (
                             <div className="text-sm text-red-800">
-                              <p className="font-medium mb-1">{errorData.error || 'Failed to load headers'}</p>
+                              <p className="font-medium mb-1">{errorData.error || 'Failed to load fields'}</p>
                               {errorData.details && (
                                 <p className="text-xs text-red-600 mt-1">{errorData.details}</p>
                               )}
@@ -707,9 +762,18 @@ export function CreatePipelinePage() {
                         })()}
                       </div>
                     )}
-                    {!sourceHeadersError && !destinationHeadersError && (
-                      <div className="text-gray-500">Failed to load headers</div>
+                    {!sourceFieldsError && !destinationFieldsError && (
+                      <div className="text-gray-500">Failed to load fields</div>
                     )}
+                    <div className="mt-4">
+                      <button
+                        onClick={handleRetry}
+                        disabled={isFetchingSourceFields || isFetchingDestinationFields}
+                        className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isFetchingSourceFields || isFetchingDestinationFields ? 'Retrying...' : '🔄 Retry'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -738,6 +802,55 @@ export function CreatePipelinePage() {
           </button>
         </div>
       </div>
+      <QuickBooksCredentialsModal
+        isOpen={showQuickBooksModal}
+        onClose={() => {
+          setShowQuickBooksModal(false);
+          setPendingQuickBooksApp(null);
+        }}
+        onSubmit={async (clientId, clientSecret) => {
+          setShowQuickBooksModal(false);
+          if (!pendingQuickBooksApp) return;
+
+          try {
+            const returnTo = pendingIsSource ? 'pipeline' : 'connections';
+            const response = await fetch(
+              `http://localhost:8080/api/oauth/quickbooks/initiate?user_id=temp&return_to=${returnTo}&app_id=${pendingQuickBooksApp.id}&company_id=${companyId}&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`
+            );
+
+            if (!response.ok) {
+              let errorMessage = `${response.status} ${response.statusText}`;
+              try {
+                const errorData = await response.json();
+                if (errorData.error) {
+                  errorMessage = errorData.error;
+                }
+              } catch (e) {
+                const text = await response.text();
+                if (text) {
+                  errorMessage = text;
+                }
+              }
+              console.error('QuickBooks OAuth initiate failed:', response.status, errorMessage);
+              alert(`Failed to connect to QuickBooks: ${errorMessage}`);
+              return;
+            }
+
+            const data = await response.json();
+            if (data.auth_url) {
+              // Store credentials in sessionStorage temporarily for callback
+              sessionStorage.setItem('qb_client_id', clientId);
+              sessionStorage.setItem('qb_client_secret', clientSecret);
+              window.location.href = data.auth_url;
+            } else {
+              alert('QuickBooks OAuth endpoint did not return an auth_url');
+            }
+          } catch (error: any) {
+            console.error('Failed to initiate QuickBooks OAuth:', error);
+            alert(`Failed to connect to QuickBooks: ${error?.message || 'Unknown error'}`);
+          }
+        }}
+      />
     </div>
   );
 }

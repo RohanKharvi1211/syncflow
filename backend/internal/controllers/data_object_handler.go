@@ -3,8 +3,11 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"syncflow-backend/internal/config"
 	"syncflow-backend/internal/models"
+	"syncflow-backend/internal/services"
+	"syncflow-backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -297,6 +300,187 @@ func (h *DataObjectHandler) DeleteDataObject(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Data object deleted successfully",
+	})
+}
+
+// GetFields returns the available fields for a data object
+// Works for both Google Sheets (returns headers) and QuickBooks (returns hardcoded fields)
+func (h *DataObjectHandler) GetFields(c *gin.Context) {
+	// Get company_id from auth context
+	companyID, exists := c.Get("company_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Authentication required",
+		})
+		return
+	}
+
+	companyIDUUID, ok := companyID.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Invalid company_id in context",
+		})
+		return
+	}
+
+	// Get data_object_id from URL param
+	dataObjectIDStr := c.Param("id")
+	if dataObjectIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "data_object_id is required",
+		})
+		return
+	}
+
+	dataObjectID, err := uuid.Parse(dataObjectIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid data_object_id",
+		})
+		return
+	}
+
+	// Get data object and verify it belongs to user's company
+	var dataObject models.DataObject
+	if err := config.DB.Preload("Connection").Preload("Connection.App").First(&dataObject, dataObjectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Data object not found",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Verify connection belongs to user's company
+	if dataObject.Connection.CompanyID != companyIDUUID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Access denied",
+		})
+		return
+	}
+
+	// Check the app type to determine how to fetch fields
+	appName := dataObject.Connection.App.Name
+	var fields []string
+
+	if appName == "googlesheet" || appName == "googledrive" {
+		// For Google Sheets, fetch headers from the sheet
+		// Check if connection has access token
+		if dataObject.Connection.AccessToken == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Connection does not have an access token. Please reconnect.",
+			})
+			return
+		}
+
+		// Refresh token if needed
+		if err := utils.RefreshTokenIfNeeded(&dataObject.Connection); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Token refresh failed",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		// Reload connection to get updated token
+		if err := config.DB.Preload("Connection").First(&dataObject, dataObject.ID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Data object not found",
+			})
+			return
+		}
+
+		if dataObject.Connection.AccessToken == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Connection does not have an access token. Please reconnect.",
+			})
+			return
+		}
+
+		// Get spreadsheet ID from data object identifier
+		spreadsheetID := dataObject.Identifier
+
+		// Get range from query (optional, defaults to first row)
+		range_ := c.Query("range")
+		if range_ == "" {
+			range_ = "A1:Z1" // Default to first row (first sheet)
+		}
+
+		// Create Google Sheets service and authenticate
+		sheetsService := services.NewGoogleSheetsService()
+		sheetsService.Authenticate(dataObject.Connection.AccessToken, dataObject.Connection.RefreshToken)
+
+		// Fetch headers
+		headers, err := sheetsService.GetSheetHeaders(spreadsheetID, range_)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to fetch sheet headers",
+				"details": err.Error(),
+				"spreadsheet_id": spreadsheetID,
+			})
+			return
+		}
+
+		fields = headers
+	} else if appName == "quickbooks" {
+		// For QuickBooks, return hardcoded fields based on object type
+		// The identifier contains the object type (e.g., "Invoice", "Customer", "Item")
+		objectType := strings.ToLower(dataObject.Identifier)
+		
+		// Parse config to get object_name if available
+		var configMap map[string]interface{}
+		if err := json.Unmarshal([]byte(dataObject.Config), &configMap); err == nil {
+			if objName, ok := configMap["object_name"].(string); ok && objName != "" {
+				objectType = strings.ToLower(objName)
+			}
+		}
+
+		// Return hardcoded fields based on object type
+		switch objectType {
+		case "invoice", "invoices":
+			fields = []string{
+				"Id", "SyncToken", "DocNumber", "TxnDate",
+				"CustomerRef.value", "CustomerRef.name",
+				"TotalAmt", "Balance",
+				"Line[].Amount", "Line[].DetailType",
+				"Line[].SalesItemLineDetail.ItemRef.value",
+				"Line[].SalesItemLineDetail.ItemRef.name",
+				"Line[].SalesItemLineDetail.Qty",
+			}
+		case "customer", "customers":
+			fields = []string{
+				"Id", "SyncToken", "CompanyName", "DisplayName",
+				"PrimaryPhone.FreeFormNumber",
+				"BillAddr.Line1", "BillAddr.City",
+				"BillAddr.CountrySubDivisionCode", "BillAddr.PostalCode", "BillAddr.Country",
+				"WebAddr.URI",
+			}
+		case "item", "items":
+			fields = []string{
+				"Id", "SyncToken", "Name", "Description", "Type",
+				"UnitPrice",
+				"IncomeAccountRef.value", "IncomeAccountRef.name",
+			}
+		default:
+			// Default to Invoice fields if unknown
+			fields = []string{
+				"Id", "SyncToken", "DocNumber", "TxnDate",
+				"CustomerRef.value", "CustomerRef.name",
+				"TotalAmt", "Balance",
+			}
+		}
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Fields not available for this app type",
+			"app_name": appName,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"fields": fields,
+		"data_object_id": dataObjectID,
+		"app_name": appName,
+		"object_type": dataObject.Identifier,
 	})
 }
 

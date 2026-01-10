@@ -43,14 +43,14 @@ INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metada
   true
 );
 
--- QuickBooks App (destination)
+-- QuickBooks App (source and destination)
 INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") VALUES
 (
   uuid_generate_v4(),
   'quickbooks',
   'QuickBooks',
-  'Sync data to QuickBooks accounting software',
-  'destination',
+  'Sync data to/from QuickBooks accounting software',
+  'both',
   '{
     "required_fields": ["realm_id"],
     "optional_fields": ["company_name"],

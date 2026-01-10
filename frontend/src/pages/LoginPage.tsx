@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@shared/store/authStore';
 import { SignInUseCase } from '@domains/auth/useCases/signInUseCase';
@@ -6,10 +6,21 @@ import { API_BASE_URL } from '@core/config';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { setUser } = useAuthStore();
+  const { setUser, isAuthenticated, isLoading } = useAuthStore();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    // Check both store state and localStorage to catch cases where store hasn't updated yet
+    const storedUser = localStorage.getItem('user');
+    const storedToken = localStorage.getItem('auth_token');
+    
+    if ((!isLoading && isAuthenticated) || (storedUser && storedToken)) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, isLoading, navigate]);
 
   const handleGoogleSignIn = async () => {
     try {

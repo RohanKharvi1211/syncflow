@@ -15,20 +15,24 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   isLoading: true,
 
   setUser: (user) => {
-    set({ user, isAuthenticated: !!user, isLoading: false });
+    // Update localStorage first to ensure persistence
     if (user) {
       localStorage.setItem('user', JSON.stringify(user));
     } else {
       localStorage.removeItem('user');
     }
+    // Then update state - this ensures localStorage is always in sync
+    set({ user, isAuthenticated: !!user, isLoading: false });
   },
 
   setToken: (token) => {
+    // Update localStorage first
     if (token) {
       localStorage.setItem('auth_token', token);
     } else {
       localStorage.removeItem('auth_token');
     }
+    // Note: setToken doesn't update isAuthenticated - that's handled by setUser
   },
 
   getToken: () => {

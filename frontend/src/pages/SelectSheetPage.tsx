@@ -16,20 +16,38 @@ interface GoogleSheet {
 export function SelectSheetPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { setToken } = useAuthStore();
+  const { setToken, setUser } = useAuthStore();
   const connectionId = searchParams.get('connection_id');
   const token = searchParams.get('token');
+  const companyId = searchParams.get('company_id');
+  const email = searchParams.get('email');
   const returnTo = searchParams.get('return_to'); // 'pipeline' or 'connections'
   const sourceAppId = searchParams.get('source_app_id'); // For pipeline creation flow
+  const isSource = searchParams.get('is_source'); // 'true' or 'false' - indicates if this is for source or destination
 
   const [selectedSheet, setSelectedSheet] = useState<GoogleSheet | null>(null);
   const queryClient = useQueryClient();
 
   useEffect(() => {
     if (token) {
+      // Set token and user immediately to prevent redirect to login
       setToken(token);
+      
+      // Set user from URL params if available to keep user authenticated
+      if (companyId) {
+        setUser({
+          id: '', // Will be fetched from token if needed
+          company_id: companyId,
+          email: email ? decodeURIComponent(email) : '',
+          role: 'user' as const,
+          is_active: true,
+        });
+      }
+    } else if (!token && !connectionId) {
+      // If no token and no connection, redirect to login
+      navigate('/login');
     }
-  }, [token, setToken]);
+  }, [token, companyId, email, connectionId, setToken, setUser, navigate]);
 
   const { data: sheets, isLoading, error } = useQuery<GoogleSheet[]>(
     ['googleSheets', connectionId],
@@ -60,7 +78,35 @@ export function SelectSheetPage() {
         
         // If we came from pipeline creation, redirect back with connection and data object info
         if (returnTo === 'pipeline') {
-          navigate(`/pipelines/create?source_connection_id=${connectionId}&source_data_object_id=${dataObject.id}`);
+          // Restore pipeline state from sessionStorage
+          const savedSourceConnectionId = sessionStorage.getItem('pipeline_source_connection_id') || '';
+          const savedSourceDataObjectId = sessionStorage.getItem('pipeline_source_data_object_id') || '';
+          const savedDestinationConnectionId = sessionStorage.getItem('pipeline_destination_connection_id') || '';
+          const savedDestinationDataObjectId = sessionStorage.getItem('pipeline_destination_data_object_id') || '';
+          
+          // Build redirect URL with appropriate params based on is_source
+          let redirectParams = '';
+          if (isSource === 'true') {
+            // This is for source - include source params and preserve destination if exists
+            redirectParams = `source_connection_id=${connectionId}&source_data_object_id=${dataObject.id}`;
+            if (savedDestinationConnectionId) {
+              redirectParams += `&destination_connection_id=${savedDestinationConnectionId}`;
+            }
+            if (savedDestinationDataObjectId) {
+              redirectParams += `&destination_data_object_id=${savedDestinationDataObjectId}`;
+            }
+          } else {
+            // This is for destination - include destination params and preserve source if exists
+            redirectParams = `destination_connection_id=${connectionId}&destination_data_object_id=${dataObject.id}`;
+            if (savedSourceConnectionId) {
+              redirectParams += `&source_connection_id=${savedSourceConnectionId}`;
+            }
+            if (savedSourceDataObjectId) {
+              redirectParams += `&source_data_object_id=${savedSourceDataObjectId}`;
+            }
+          }
+          
+          navigate(`/pipelines/create?${redirectParams}`);
         } else {
           // Otherwise, go to connections page
           navigate('/connections');
@@ -165,6 +211,19 @@ export function SelectSheetPage() {
               className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
             >
               Back to Connections
+            </button>
+          </div>
+        )}
+
+        {/* Add skip option for login flow (when returnTo is not set) */}
+        {!returnTo && (
+          <div className="mt-8 bg-white rounded-lg shadow p-6 text-center">
+            <p className="text-gray-600 mb-4">Don't want to select a sheet right now?</p>
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+            >
+              Go to Dashboard
             </button>
           </div>
         )}

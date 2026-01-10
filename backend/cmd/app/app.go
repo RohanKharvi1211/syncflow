@@ -52,6 +52,21 @@ func (app *App) newDatabaseConnection(cfg *config.Config) {
 	// Enable UUID extension
 	app.db.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
+	// Lightweight startup migration(s)
+	// NOTE:
+	// We normally rely on SQL migration files + external migrate tool,
+	// but some critical data fixes (like app definitions) can be safely
+	// enforced here so the app \"just works\" even if migrate wasn't run.
+	//
+	// 1) Ensure QuickBooks app can be used as both source and destination
+	//    (so it appears in the source dropdown and as a destination).
+	app.db.Exec(`
+		UPDATE "apps"
+		SET "type" = 'both',
+		    "description" = 'Sync data to/from QuickBooks accounting software'
+		WHERE "name" = 'quickbooks' AND "type" <> 'both'
+	`)
+
 	// Auto migrations are handled via SQL migration files.
 	// Skipping AutoMigrate here prevents accidental schema changes at runtime.
 	fmt.Printf("Database connected successfully\n")
@@ -250,6 +265,8 @@ func (app *App) addRoutes(router *gin.Engine) {
 		{
 			oauth.GET("/google/initiate", app.controllers.OAuth.InitiateGoogleOAuth)
 			oauth.GET("/google/callback", app.controllers.OAuth.GoogleOAuthCallback)
+			oauth.GET("/quickbooks/initiate", app.controllers.OAuth.InitiateQuickBooksOAuth)
+			oauth.GET("/quickbooks/callback", app.controllers.OAuth.QuickBooksOAuthCallback)
 		}
 
 		// Pipeline routes (new design, protected)
@@ -270,6 +287,7 @@ func (app *App) addRoutes(router *gin.Engine) {
 		dataObjects.Use(authMiddleware.AuthMiddleware())
 		{
 			dataObjects.GET("", app.controllers.DataObject.GetDataObjects)
+			dataObjects.GET("/:id/fields", app.controllers.DataObject.GetFields) // Must be before /:id route
 			dataObjects.GET("/:id", app.controllers.DataObject.GetDataObject)
 			dataObjects.POST("", app.controllers.DataObject.CreateDataObject)
 			dataObjects.PUT("/:id", app.controllers.DataObject.UpdateDataObject)

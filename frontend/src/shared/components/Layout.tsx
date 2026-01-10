@@ -83,7 +83,7 @@ export function Layout({ children }: LayoutProps) {
           </nav>
         </aside>
 
-        <main className="flex-1 p-8">{children}</main>
+        <main className="flex-1 p-8 overflow-x-hidden max-w-full">{children}</main>
       </div>
     </div>
   );

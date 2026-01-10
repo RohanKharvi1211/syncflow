@@ -28,7 +28,7 @@ export function OAuthCallbackPage() {
       setStatus('success');
       setMessage(`Successfully authenticated with ${provider || 'account'}`);
       
-      // Store token
+      // Store token first
       setToken(token);
       
       // Create user object from URL params
@@ -41,12 +41,12 @@ export function OAuthCallbackPage() {
         is_active: true,
       };
       
+      // Set user - this will update isAuthenticated
       setUser(user);
       
-      // Redirect to dashboard for the company
-      setTimeout(() => {
-        navigate('/dashboard');
-      }, 1500);
+      // Redirect immediately after setting user (no delay needed)
+      // Use replace to prevent back button from going to login
+      navigate('/dashboard', { replace: true });
       return;
     }
 

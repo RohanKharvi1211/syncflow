@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"syncflow-backend/internal/config"
 	"syncflow-backend/internal/models"
 	"syncflow-backend/internal/utils"
@@ -286,9 +287,58 @@ func (ps *PipelineService) fetchFromGoogleSheet(dataObject *models.DataObject, c
 
 // fetchFromQuickBooks fetches records from QuickBooks since checkpoint
 func (ps *PipelineService) fetchFromQuickBooks(dataObject *models.DataObject, checkpoint *models.Checkpoint) ([]map[string]interface{}, error) {
-	// Use changedSince for QuickBooks incremental sync
-	// This is a placeholder - you'd integrate with your actual QuickBooks service
-	return nil, fmt.Errorf("QuickBooks fetch not yet implemented")
+	// Set up QuickBooks service with connection tokens
+	connection := dataObject.Connection
+
+	// Build config for QuickBooks service
+	qbConfig := map[string]interface{}{
+		"access_token":  connection.AccessToken,
+		"refresh_token": connection.RefreshToken,
+		"realm_id":      connection.RealmID,
+	}
+
+	if err := ps.QuickBooksService.Authenticate(qbConfig); err != nil {
+		return nil, fmt.Errorf("failed to authenticate QuickBooks service: %v", err)
+	}
+
+	// NOTE: For now we support downloading Customers from QuickBooks.
+	// We can extend this to Items, Invoices, etc. based on dataObject.Identifier.
+	objectType := dataObject.Identifier
+	if objectType == "" {
+		// Default to Customer if not specified
+		objectType = "Customer"
+	}
+
+	var records []map[string]interface{}
+
+	switch strings.ToLower(objectType) {
+	case "customer", "customers":
+		customers, err := ps.QuickBooksService.QueryCustomers()
+		if err != nil {
+			return nil, fmt.Errorf("failed to query QuickBooks customers: %v", err)
+		}
+
+		// Convert strongly-typed customers into generic map[string]interface{}
+		for _, c := range customers {
+			b, err := json.Marshal(c)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal QuickBooks customer: %v", err)
+			}
+
+			var m map[string]interface{}
+			if err := json.Unmarshal(b, &m); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal QuickBooks customer into map: %v", err)
+			}
+			records = append(records, m)
+		}
+
+	default:
+		return nil, fmt.Errorf("QuickBooks fetch not yet implemented for object type: %s", objectType)
+	}
+
+	// For now we fetch all records each run; checkpoint-based incremental
+	// sync can be added later using MetaData.LastUpdatedTime filters.
+	return records, nil
 }
 
 // processRecord transforms and writes a single record

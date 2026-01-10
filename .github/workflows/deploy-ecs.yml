@@ -216,10 +216,11 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
         run: |
-          docker build \
-            --build-arg VITE_API_BASE_URL=$VITE_API_BASE_URL \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG \
-            -f frontend/Dockerfile frontend/
+          if [ -z "$VITE_API_BASE_URL" ]; then
+            echo "⚠️  WARNING: VITE_API_BASE_URL secret is not set. Using default."
+            VITE_API_BASE_URL="http://localhost:8080/api"
+          fi
+          docker build --build-arg VITE_API_BASE_URL="$VITE_API_BASE_URL" -t $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG -f frontend/Dockerfile frontend/
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY_FRONTEND:latest

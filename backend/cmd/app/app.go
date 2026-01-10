@@ -134,12 +134,40 @@ func (app *App) setUpHandlers(cfg *config.Config) *gin.Engine {
 
 	// Note: HTML templates are served by frontend server, backend just redirects
 
-	// Add middleware
+	// CRITICAL: Register health endpoint BEFORE middlewares
+	// This ensures health checks work even if middlewares fail
+	router.GET("/health", app.healthCheck)
+
+	// Add middleware (order matters!)
+	// Bot protection first - blocks common scanner paths early
+	// Note: health endpoint is already registered above, so it bypasses bot protection
+	router.Use(app.middlewares.BotProtection)
+	// Rate limiting - prevents abuse
+	// Note: health endpoint bypasses rate limiting (already registered)
+	router.Use(app.middlewares.RateLimit)
+	// CORS - allows cross-origin requests
 	router.Use(app.middlewares.CORS)
+	// Logger - logs all requests (after bot protection to reduce noise)
 	router.Use(app.middlewares.Logger)
 
 	app.addRoutes(router)
 	return router
+}
+
+// healthCheck performs basic liveness check - verifies the application is running
+// Note: We DON'T check database connectivity here because:
+// 1. If DB is down, restarting the app won't help
+// 2. Health check should verify app liveness, not dependency health
+// 3. DB connectivity issues should be logged but not cause container restarts
+// The app will log DB errors separately, allowing us to fix the DB issue
+// rather than constantly restarting containers
+func (app *App) healthCheck(c *gin.Context) {
+	// Simple liveness check - is the HTTP server responding?
+	// If we reach here, the app is initialized and HTTP server is running
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "healthy",
+		"service": "syncflow-backend",
+	})
 }
 
 func (app *App) newApp(cfg *config.Config) {
@@ -235,13 +263,8 @@ func (l *SimpleLogger) WithRequest(c *gin.Context, r interface{}) interface{} {
 }
 
 func (app *App) addRoutes(router *gin.Engine) {
-	// Health check
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status":  "healthy",
-			"service": "syncflow-backend",
-		})
-	})
+	// Health check is already registered in setUpHandlers() before middlewares
+	// No need to register it again here
 
 	// API routes
 	api := router.Group("/api")

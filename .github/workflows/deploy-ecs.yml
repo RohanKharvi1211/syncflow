@@ -350,24 +350,71 @@ jobs:
             --output table 2>/dev/null || echo "⚠️  Could not fetch events"
         continue-on-error: true
 
-      - name: Register task definition (if service doesn't exist)
+      - name: Register task definition and create service (if service doesn't exist)
         if: steps.check-service-frontend.outputs.service_exists == 'false'
         continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 10
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          CLUSTER: ${{ env.ECS_CLUSTER }}
+          SERVICE_NAME: ${{ env.ECS_SERVICE_FRONTEND }}
+          TASK_DEF_FAMILY: ${{ env.ECS_TASK_DEFINITION_FRONTEND }}
         run: |
-          echo "📦 Registering task definition for future service creation..."
-          # Retry up to 3 times with exponential backoff
+          echo "📦 Service doesn't exist. Registering task definition and creating service..."
+          
+          # Register task definition (retry up to 3 times)
+          TASK_DEF_ARN=""
           for i in 1 2 3; do
-            if aws ecs register-task-definition \
+            if REGISTER_OUTPUT=$(aws ecs register-task-definition \
               --cli-input-json file://${{ steps.render-task-def-frontend.outputs.task-definition }} \
-              --region ${{ env.AWS_REGION }} 2>&1; then
-              echo "✓ Task definition registered successfully"
-              exit 0
-            else
-              echo "⚠️  Attempt $i failed, retrying..."
-              sleep $((i * 2))
+              --region $AWS_REGION 2>&1); then
+              TASK_DEF_ARN=$(echo "$REGISTER_OUTPUT" | grep -oP 'taskDefinitionArn":\s*"\K[^"]+' | head -1 || echo "")
+              if [ -n "$TASK_DEF_ARN" ]; then
+                echo "✓ Task definition registered: $TASK_DEF_ARN"
+                break
+              fi
             fi
+            echo "⚠️  Attempt $i failed, retrying..."
+            sleep $((i * 2))
           done
-          echo "⚠️  Failed to register task definition after 3 attempts (non-critical, you can register manually later)"
-          exit 0
+          
+          if [ -z "$TASK_DEF_ARN" ]; then
+            echo "⚠️  Failed to register task definition. Cannot create service."
+            exit 0
+          fi
+          
+          # Get VPC and subnets for service creation
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --region $AWS_REGION --query 'Vpcs[0].VpcId' --output text)
+          SUBNET_IDS=($(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --region $AWS_REGION --query 'Subnets[*].SubnetId' --output text))
+          SUBNET_1=${SUBNET_IDS[0]}
+          SUBNET_2=${SUBNET_IDS[1]}
+          
+          # Get frontend security group
+          FRONTEND_SG_ID=$(aws ec2 describe-security-groups \
+            --filters "Name=group-name,Values=syncflow-frontend-task-sg" "Name=vpc-id,Values=$VPC_ID" \
+            --region $AWS_REGION \
+            --query 'SecurityGroups[0].GroupId' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -z "$FRONTEND_SG_ID" ] || [ "$FRONTEND_SG_ID" == "None" ]; then
+            echo "⚠️  Frontend security group not found. Service creation may fail."
+            echo "   Run: cd ecs && AWS_REGION=$AWS_REGION ./create-ecs-services.sh"
+            exit 0
+          fi
+          
+          # Create service
+          if aws ecs create-service \
+            --cluster "$CLUSTER" \
+            --service-name "$SERVICE_NAME" \
+            --task-definition "$TASK_DEF_ARN" \
+            --desired-count 1 \
+            --launch-type FARGATE \
+            --platform-version LATEST \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_1,$SUBNET_2],securityGroups=[$FRONTEND_SG_ID],assignPublicIp=ENABLED}" \
+            --health-check-grace-period-seconds 60 \
+            --region $AWS_REGION 2>&1; then
+            echo "✓ Frontend service created: $SERVICE_NAME"
+          else
+            echo "⚠️  Failed to create service (may already exist or need manual creation)"
+          fi
 

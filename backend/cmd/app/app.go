@@ -234,7 +234,9 @@ func (app *App) setUpHandlers(cfg *config.Config) *gin.Engine {
 
 	// CRITICAL: Register health endpoint BEFORE middlewares
 	// This ensures health checks work even if middlewares fail
+	// Support both GET and HEAD requests (HEAD is used by wget --spider)
 	router.GET("/health", app.healthCheck)
+	router.HEAD("/health", app.healthCheck)
 
 	// Add middleware (order matters!)
 	// Bot protection first - blocks common scanner paths early

@@ -4,7 +4,8 @@
 
 set -e
 
-AWS_REGION=${AWS_REGION:-us-east-1}
+# Get AWS region from AWS CLI config or use default
+AWS_REGION=${AWS_REGION:-$(aws configure get region 2>/dev/null || echo "us-east-1")}
 
 echo "=========================================="
 echo "AWS Secrets Manager Setup for SyncFlow"

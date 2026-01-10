@@ -52,6 +52,36 @@ JWT_SECRET_ARN=$(aws secretsmanager describe-secret \
     --query 'ARN' \
     --output text 2>/dev/null || echo "")
 
+GOOGLE_CLIENT_ID_ARN=$(aws secretsmanager describe-secret \
+    --secret-id "${PROJECT_NAME}/google/client_id" \
+    --region $AWS_REGION \
+    --query 'ARN' \
+    --output text 2>/dev/null || echo "")
+
+GOOGLE_CLIENT_SECRET_ARN=$(aws secretsmanager describe-secret \
+    --secret-id "${PROJECT_NAME}/google/client_secret" \
+    --region $AWS_REGION \
+    --query 'ARN' \
+    --output text 2>/dev/null || echo "")
+
+GOOGLE_REDIRECT_URI_ARN=$(aws secretsmanager describe-secret \
+    --secret-id "${PROJECT_NAME}/google/redirect_uri" \
+    --region $AWS_REGION \
+    --query 'ARN' \
+    --output text 2>/dev/null || echo "")
+
+# Get ALB DNS for redirect URI if secret doesn't exist
+if [ -z "$GOOGLE_REDIRECT_URI_ARN" ] || [ "$GOOGLE_REDIRECT_URI_ARN" == "None" ]; then
+    ALB_DNS=$(aws elbv2 describe-load-balancers --names "${PROJECT_NAME}-backend-alb" --region $AWS_REGION --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || echo "")
+    if [ -n "$ALB_DNS" ]; then
+        GOOGLE_REDIRECT_URI="http://${ALB_DNS}/api/oauth/google/callback"
+    else
+        GOOGLE_REDIRECT_URI="http://localhost:8080/api/oauth/google/callback"
+    fi
+else
+    GOOGLE_REDIRECT_URI=""
+fi
+
 # Get execution and task role ARNs
 EXEC_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole"
 TASK_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskRole"
@@ -147,7 +177,50 @@ cat > /tmp/new-task-def.json <<EOF
           "name": "JWT_SECRET",
           "valueFrom": "${JWT_SECRET_ARN}"
         }
+EOF
+
+# Add Google secrets if they exist
+if [ -n "$GOOGLE_CLIENT_ID_ARN" ] && [ "$GOOGLE_CLIENT_ID_ARN" != "None" ]; then
+    cat >> /tmp/new-task-def.json <<EOF
+        ,
+        {
+          "name": "GOOGLE_CLIENT_ID",
+          "valueFrom": "${GOOGLE_CLIENT_ID_ARN}"
+        },
+        {
+          "name": "GOOGLE_CLIENT_SECRET",
+          "valueFrom": "${GOOGLE_CLIENT_SECRET_ARN}"
+        }
+EOF
+fi
+
+# Add Google Redirect URI as environment variable (not secret, but dynamic)
+if [ -n "$GOOGLE_REDIRECT_URI" ]; then
+    # We need to add it to environment section, not secrets
+    # First, close the secrets array
+    cat >> /tmp/new-task-def.json <<EOF
       ],
+EOF
+    # Then modify the environment section to include redirect URI
+    # This is complex, so we'll use jq or sed
+    # For now, let's add it as a secret if the ARN exists, otherwise as env var
+    if [ -n "$GOOGLE_REDIRECT_URI_ARN" ] && [ "$GOOGLE_REDIRECT_URI_ARN" != "None" ]; then
+        # Remove the last ], add the secret, then add ],
+        sed -i.bak 's/      ],/      ,\
+        {\
+          "name": "GOOGLE_REDIRECT_URI",\
+          "valueFrom": "'"${GOOGLE_REDIRECT_URI_ARN}"'"\
+        }\
+      ],/' /tmp/new-task-def.json 2>/dev/null || true
+    fi
+else
+    # Close secrets array if no Google secrets
+    cat >> /tmp/new-task-def.json <<EOF
+      ],
+EOF
+fi
+
+cat >> /tmp/new-task-def.json <<EOF
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
@@ -181,6 +254,13 @@ echo "  DB_PASSWORD: ${DB_PASSWORD_ARN}"
 echo "  DB_NAME: ${DB_NAME_ARN}"
 echo "  DB_PORT: ${DB_PORT_ARN}"
 echo "  JWT_SECRET: ${JWT_SECRET_ARN}"
+if [ -n "$GOOGLE_CLIENT_ID_ARN" ] && [ "$GOOGLE_CLIENT_ID_ARN" != "None" ]; then
+    echo "  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID_ARN} ✓"
+    echo "  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET_ARN} ✓"
+else
+    echo "  GOOGLE_CLIENT_ID: ⚠️  Not found (OAuth will not work)"
+    echo "  GOOGLE_CLIENT_SECRET: ⚠️  Not found (OAuth will not work)"
+fi
 echo ""
 
 # Register new task definition

@@ -24,21 +24,29 @@ export function LoginPage() {
   const handleGoogleSignIn = async () => {
     try {
       // Use backend OAuth initiation endpoint to get proper state parameter
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api'}/oauth/google/initiate?user_id=temp`, {
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
+      const response = await fetch(`${apiBaseUrl}/oauth/google/initiate?user_id=temp`, {
         method: 'GET',
       });
       
+      const data = await response.json();
+      
       if (!response.ok) {
-        const error = await response.json();
-        setError(error.error || 'Failed to initiate OAuth');
+        // Backend returned an error (e.g., OAuth not configured)
+        setError(data.error || `Failed to initiate OAuth (${response.status})`);
+        console.error('OAuth initiation failed:', data);
         return;
       }
 
-      const data = await response.json();
       // Redirect to Google OAuth with state from backend
-      window.location.href = data.auth_url;
+      if (data.auth_url) {
+        window.location.href = data.auth_url;
+      } else {
+        setError('Invalid response from server: missing auth_url');
+      }
     } catch (err: any) {
-      setError('Failed to initiate Google sign in');
+      const errorMessage = err.message || 'Failed to initiate Google sign in';
+      setError(errorMessage);
       console.error('OAuth initiation error:', err);
     }
   };

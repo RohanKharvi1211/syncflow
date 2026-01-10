@@ -142,7 +142,9 @@ If you have a custom domain with an Application Load Balancer (ALB):
 
 If you don't have a custom domain yet, you can use the ALB DNS name temporarily:
 
-**Format:** `http://your-alb-name-123456789.us-east-1.elb.amazonaws.com`
+**Format:** `http://your-alb-name-123456789.us-east-1.elb.amazonaws.com/api`
+
+**⚠️ IMPORTANT:** The `/api` suffix is REQUIRED because the frontend code appends paths like `/oauth/google/initiate` to the base URL.
 
 **Steps:**
 
@@ -154,7 +156,12 @@ If you don't have a custom domain yet, you can use the ALB DNS name temporarily:
        --output text
    ```
 
-**Then use:** `http://YOUR-ALB-DNS-NAME.us-east-1.elb.amazonaws.com`
+**Then use:** `http://YOUR-ALB-DNS-NAME.us-east-1.elb.amazonaws.com/api` (with `/api` at the end!)
+
+**Example:**
+- ALB DNS: `syncflow-backend-alb-123456789.ap-south-1.elb.amazonaws.com`
+- `VITE_API_BASE_URL`: `http://syncflow-backend-alb-123456789.ap-south-1.elb.amazonaws.com/api`
+- This makes frontend call: `http://syncflow-backend-alb-123456789.ap-south-1.elb.amazonaws.com/api/oauth/google/initiate` ✅
 
 **⚠️ Note:** Without a custom domain, you'll use HTTP (not HTTPS), which is not recommended for production.
 
@@ -225,14 +232,14 @@ ALB_DNS=$(aws elbv2 describe-load-balancers \
 
 if [ -z "$ALB_DNS" ]; then
     echo "   ⚠️  No ALB found. Options:"
-    echo "      a) If you have a custom domain: https://api.yourdomain.com"
+    echo "      a) If you have a custom domain: https://api.yourdomain.com/api"
     echo "      b) If using ALB: Get ALB DNS from AWS Console after creating ALB"
-    echo "      c) Temporary placeholder: https://api.yourdomain.com"
-    VITE_API_BASE_URL="https://api.yourdomain.com"
+    echo "      c) Temporary placeholder: https://api.yourdomain.com/api"
+    VITE_API_BASE_URL="https://api.yourdomain.com/api"
 else
     echo "   ✓ Found ALB: $ALB_DNS"
-    echo "   Using: http://$ALB_DNS (or configure HTTPS with custom domain)"
-    VITE_API_BASE_URL="http://$ALB_DNS"
+    echo "   Using: http://$ALB_DNS/api (⚠️  /api suffix required!)"
+    VITE_API_BASE_URL="http://$ALB_DNS/api"
 fi
 
 echo ""

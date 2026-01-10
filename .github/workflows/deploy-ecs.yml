@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ap-south-1  # Updated to match your AWS region
   ECR_REPOSITORY_BACKEND: syncflow-backend
   ECR_REPOSITORY_FRONTEND: syncflow-frontend
   ECS_CLUSTER: syncflow-cluster
@@ -106,13 +106,33 @@ jobs:
           container-name: backend
           image: ${{ steps.build-image-backend.outputs.image }}
 
+      - name: Check if ECS service exists
+        id: check-service-backend
+        run: |
+          if aws ecs describe-services --cluster ${{ env.ECS_CLUSTER }} --services ${{ env.ECS_SERVICE_BACKEND }} --region ${{ env.AWS_REGION }} --query 'services[0].status' --output text 2>/dev/null | grep -q ACTIVE; then
+            echo "service_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "service_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  ECS service ${{ env.ECS_SERVICE_BACKEND }} does not exist. Skipping deployment."
+            echo "📝 Please create the service first using: ecs/create-ecs-services.sh"
+          fi
+
       - name: Deploy Amazon ECS task definition
+        if: steps.check-service-backend.outputs.service_exists == 'true'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           task-definition: ${{ steps.render-task-def-backend.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE_BACKEND }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+
+      - name: Register task definition (if service doesn't exist)
+        if: steps.check-service-backend.outputs.service_exists == 'false'
+        run: |
+          echo "📦 Registering task definition for future service creation..."
+          aws ecs register-task-definition \
+            --cli-input-json file://${{ steps.render-task-def-backend.outputs.task-definition }} \
+            --region ${{ env.AWS_REGION }}
 
   build-and-deploy-frontend:
     name: Build and Deploy Frontend
@@ -208,11 +228,31 @@ jobs:
           container-name: frontend
           image: ${{ steps.build-image-frontend.outputs.image }}
 
+      - name: Check if ECS service exists
+        id: check-service-frontend
+        run: |
+          if aws ecs describe-services --cluster ${{ env.ECS_CLUSTER }} --services ${{ env.ECS_SERVICE_FRONTEND }} --region ${{ env.AWS_REGION }} --query 'services[0].status' --output text 2>/dev/null | grep -q ACTIVE; then
+            echo "service_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "service_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  ECS service ${{ env.ECS_SERVICE_FRONTEND }} does not exist. Skipping deployment."
+            echo "📝 Please create the service first using: ecs/create-ecs-services.sh"
+          fi
+
       - name: Deploy Amazon ECS task definition
+        if: steps.check-service-frontend.outputs.service_exists == 'true'
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           task-definition: ${{ steps.render-task-def-frontend.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE_FRONTEND }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+
+      - name: Register task definition (if service doesn't exist)
+        if: steps.check-service-frontend.outputs.service_exists == 'false'
+        run: |
+          echo "📦 Registering task definition for future service creation..."
+          aws ecs register-task-definition \
+            --cli-input-json file://${{ steps.render-task-def-frontend.outputs.task-definition }} \
+            --region ${{ env.AWS_REGION }}
 

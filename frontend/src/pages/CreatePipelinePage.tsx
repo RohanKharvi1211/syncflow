@@ -308,7 +308,8 @@ export function CreatePipelinePage() {
 
   // Helper function to render error message
   const renderError = (error: unknown): React.ReactNode => {
-    const errorData = (error as any) || {};
+    if (!error) return null;
+    const errorData = error as any;
     
     const isPermissionError = 
       errorData.error === 'Google Sheets API Permission Required' ||
@@ -757,11 +758,11 @@ export function CreatePipelinePage() {
                   <div className="text-gray-500">Loading fields...</div>
                 ) : (
                   <div className="max-w-2xl mx-auto">
-                    {(sourceFieldsError || destinationFieldsError) && (
+                    {sourceFieldsError || destinationFieldsError ? (
                       <div className="bg-red-50 border border-red-200 rounded-lg p-6">
                         {renderError(sourceFieldsError || destinationFieldsError)}
                       </div>
-                    )}
+                    ) : null}
                     {!sourceFieldsError && !destinationFieldsError && sourceFields && destinationFields && sourceFields.length === 0 && destinationFields.length === 0 && (
                       <div className="text-gray-500">No fields available to map</div>
                     )}

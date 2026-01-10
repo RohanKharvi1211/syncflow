@@ -1,0 +1,51 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+main
+
+# Test files
+*.test
+*.out
+coverage.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+DEBUG_*.md
+QUICK_*.md
+MIGRATION_*.md
+SCHEMA_*.md
+OAUTH_*.md
+RESTRUCTURING.md
+PIPELINE_*.md
+
+# Scripts
+*.sh
+
+# Logs
+*.log
+

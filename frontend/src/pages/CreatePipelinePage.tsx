@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useAuthStore } from '@shared/store/authStore';
@@ -304,6 +304,83 @@ export function CreatePipelinePage() {
 
   const removeFieldMapping = (index: number) => {
     setFieldMappings(fieldMappings.filter((_, i) => i !== index));
+  };
+
+  // Helper function to render error message
+  const renderError = (error: unknown): React.ReactNode => {
+    const errorData = (error as any) || {};
+    
+    const isPermissionError = 
+      errorData.error === 'Google Sheets API Permission Required' ||
+      errorData.error === 'Google Sheets API is not enabled' ||
+      (errorData.details && typeof errorData.details === 'string' && (
+        errorData.details.includes('API has not been used') ||
+        errorData.details.includes('it is disabled') ||
+        errorData.details.includes('PERMISSION_DENIED')
+      ));
+    
+    if (isPermissionError) {
+      return (
+        <div className="text-center space-y-4">
+          <div>
+            <p className="text-lg font-semibold text-red-900 mb-2">
+              ⚠️ {String(errorData.error || 'Permission Error')}
+            </p>
+            <p className="text-sm text-red-800 mb-4">
+              {String(errorData.message || 'The Google Sheets API needs to be enabled in your Google Cloud project.')}
+            </p>
+          </div>
+          
+          {errorData.enable_url ? (
+            <a 
+              href={String(errorData.enable_url)} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-md"
+            >
+              🔗 Enable Google Sheets API
+            </a>
+          ) : errorData.help_url ? (
+            <a 
+              href={String(errorData.help_url)} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-md"
+            >
+              🔗 Open Google Cloud Console
+            </a>
+          ) : (
+            <a 
+              href="https://console.developers.google.com/apis/api/sheets.googleapis.com/overview" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-md"
+            >
+              🔗 Enable Google Sheets API
+            </a>
+          )}
+          
+          <div className="flex flex-col sm:flex-row gap-3 justify-center mt-4">
+            <button
+              onClick={handleRetry}
+              disabled={isFetchingSourceFields || isFetchingDestinationFields}
+              className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isFetchingSourceFields || isFetchingDestinationFields ? 'Retrying...' : '🔄 Retry'}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="text-sm text-red-800">
+        <p className="font-medium mb-1">{String(errorData.error || 'Failed to load fields')}</p>
+        {errorData.details && (
+          <p className="text-xs text-red-600 mt-1">{String(errorData.details)}</p>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -682,88 +759,11 @@ export function CreatePipelinePage() {
                   <div className="max-w-2xl mx-auto">
                     {(sourceFieldsError || destinationFieldsError) && (
                       <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-                        {(() => {
-                          const error = sourceFieldsError || destinationFieldsError;
-                          // httpClient interceptor now preserves all error data
-                          const errorData = (error as any) || {};
-                          
-                          // Check for permission error - match any variation
-                          const isPermissionError = 
-                            errorData.error === 'Google Sheets API Permission Required' ||
-                            errorData.error === 'Google Sheets API is not enabled' ||
-                            (errorData.details && typeof errorData.details === 'string' && (
-                              errorData.details.includes('API has not been used') ||
-                              errorData.details.includes('it is disabled') ||
-                              errorData.details.includes('PERMISSION_DENIED')
-                            ));
-                          
-                          if (isPermissionError) {
-                            return (
-                              <div className="text-center space-y-4">
-                                <div>
-                                  <p className="text-lg font-semibold text-red-900 mb-2">
-                                    ⚠️ {errorData.error}
-                                  </p>
-                                  <p className="text-sm text-red-800 mb-4">
-                                    {errorData.message || 'The Google Sheets API needs to be enabled in your Google Cloud project.'}
-                                  </p>
-                                </div>
-                                
-                                {errorData.enable_url ? (
-                                  <a 
-                                    href={errorData.enable_url} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-md"
-                                  >
-                                    🔗 Enable Google Sheets API
-                                  </a>
-                                ) : errorData.help_url ? (
-                                  <a 
-                                    href={errorData.help_url} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-md"
-                                  >
-                                    🔗 Open Google Cloud Console
-                                  </a>
-                                ) : (
-                                  <a 
-                                    href="https://console.developers.google.com/apis/api/sheets.googleapis.com/overview" 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-md"
-                                  >
-                                    🔗 Enable Google Sheets API
-                                  </a>
-                                )}
-                                
-                                <div className="flex flex-col sm:flex-row gap-3 justify-center mt-4">
-                                  <button
-                                    onClick={handleRetry}
-                                    disabled={isFetchingSourceFields || isFetchingDestinationFields}
-                                    className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {isFetchingSourceFields || isFetchingDestinationFields ? 'Retrying...' : '🔄 Retry'}
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          }
-                          
-                          return (
-                            <div className="text-sm text-red-800">
-                              <p className="font-medium mb-1">{errorData.error || 'Failed to load fields'}</p>
-                              {errorData.details && (
-                                <p className="text-xs text-red-600 mt-1">{errorData.details}</p>
-                              )}
-                            </div>
-                          );
-                        })()}
+                        {renderError(sourceFieldsError || destinationFieldsError)}
                       </div>
                     )}
-                    {!sourceFieldsError && !destinationFieldsError && (
-                      <div className="text-gray-500">Failed to load fields</div>
+                    {!sourceFieldsError && !destinationFieldsError && sourceFields && destinationFields && sourceFields.length === 0 && destinationFields.length === 0 && (
+                      <div className="text-gray-500">No fields available to map</div>
                     )}
                     <div className="mt-4">
                       <button

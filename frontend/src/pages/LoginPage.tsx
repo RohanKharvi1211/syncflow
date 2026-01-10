@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@shared/store/authStore';
 import { SignInUseCase } from '@domains/auth/useCases/signInUseCase';
-import { API_BASE_URL } from '@core/config';
 
 export function LoginPage() {
   const navigate = useNavigate();

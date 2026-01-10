@@ -22,7 +22,7 @@ export function SelectSheetPage() {
   const companyId = searchParams.get('company_id');
   const email = searchParams.get('email');
   const returnTo = searchParams.get('return_to'); // 'pipeline' or 'connections'
-  const sourceAppId = searchParams.get('source_app_id'); // For pipeline creation flow
+  // const sourceAppId = searchParams.get('source_app_id'); // For pipeline creation flow
   const isSource = searchParams.get('is_source'); // 'true' or 'false' - indicates if this is for source or destination
 
   const [selectedSheet, setSelectedSheet] = useState<GoogleSheet | null>(null);

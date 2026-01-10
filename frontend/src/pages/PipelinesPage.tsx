@@ -11,7 +11,6 @@ export function PipelinesPage() {
   const { user } = useAuthStore();
   const { selectedCompany } = useCompanyStore();
   const queryClient = useQueryClient();
-  const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(null);
 
   const { data: pipelines, isLoading } = useQuery<Pipeline[]>(
     ['pipelines', selectedCompany?.id],

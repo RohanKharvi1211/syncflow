@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from 'react-query';
 import { useAuthStore } from '@shared/store/authStore';
 import { useCompanyStore } from '@shared/store/companyStore';

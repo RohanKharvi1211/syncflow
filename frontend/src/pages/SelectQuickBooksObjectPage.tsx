@@ -40,7 +40,7 @@ export function SelectQuickBooksObjectPage() {
   const companyId = searchParams.get('company_id');
   const email = searchParams.get('email');
   const returnTo = searchParams.get('return_to'); // 'pipeline' or 'connections'
-  const sourceAppId = searchParams.get('source_app_id'); // For pipeline creation flow (not used yet but kept for parity)
+  // const sourceAppId = searchParams.get('source_app_id'); // For pipeline creation flow (not used yet but kept for parity)
   const { setUser } = useAuthStore();
 
   useEffect(() => {

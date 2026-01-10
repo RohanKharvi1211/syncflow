@@ -56,7 +56,7 @@ class DataObjectApi {
 
   async createDataObject(data: {
     connection_id: string;
-    object_type: 'SHEET' | 'TABLE' | 'INVOICE' | 'ENTITY';
+    object_type: 'SHEET' | 'TABLE' | 'INVOICE' | 'ENTITY' | 'OBJECT';
     identifier: string;
     config?: Record<string, any>;
   }): Promise<DataObject> {

@@ -1,6 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { API_BASE_URL } from '@core/config';
-import { ApiError } from '@core/types';
 
 class HttpClient {
   private client: AxiosInstance;

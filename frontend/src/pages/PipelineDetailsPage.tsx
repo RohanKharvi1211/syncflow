@@ -56,7 +56,7 @@ export function PipelineDetailsPage() {
     return <div className="text-center py-8">Loading...</div>;
   }
 
-  const { pipeline, status } = data;
+  const { pipeline } = data;
   const lastSyncTime = pipeline.checkpoint?.last_sync_time
     ? formatDistanceToNow(new Date(pipeline.checkpoint.last_sync_time), { addSuffix: true })
     : 'Never';
@@ -337,8 +337,8 @@ export function PipelineDetailsPage() {
                 <input
                   type="number"
                   value={pipeline.schedule_interval}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  readOnly
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
+                  readOnly={true}
                 />
               </div>
               <div>
@@ -348,7 +348,7 @@ export function PipelineDetailsPage() {
                 <select
                   value={pipeline.status}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  readOnly
+                  disabled
                 >
                   <option value="ACTIVE">Active</option>
                   <option value="PAUSED">Paused</option>

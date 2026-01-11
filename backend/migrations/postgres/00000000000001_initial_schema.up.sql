@@ -57,6 +57,7 @@ CREATE TABLE "connections" (
   "user_id" UUID NOT NULL,
   "company_id" UUID NOT NULL,
   "app_id" UUID NOT NULL,
+  "provider" VARCHAR(50) NOT NULL, -- 'google', 'salesforce', 'quickbooks', etc.
   "access_token" TEXT NOT NULL,
   "refresh_token" TEXT NOT NULL,
   "token_expires_at" TIMESTAMP WITH TIME ZONE,
@@ -197,6 +198,7 @@ CREATE INDEX "idx_apps_deleted_at" ON "apps" ("deleted_at");
 CREATE INDEX "idx_connections_user_id" ON "connections" ("user_id");
 CREATE INDEX "idx_connections_company_id" ON "connections" ("company_id");
 CREATE INDEX "idx_connections_app_id" ON "connections" ("app_id");
+CREATE INDEX "idx_connections_provider" ON "connections" ("provider");
 CREATE INDEX "idx_connections_is_active" ON "connections" ("is_active");
 CREATE INDEX "idx_connections_deleted_at" ON "connections" ("deleted_at");
 

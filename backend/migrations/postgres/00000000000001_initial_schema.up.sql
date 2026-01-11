@@ -54,6 +54,7 @@ CREATE TABLE "apps" (
 -- 4. Connections table - OAuth credentials per company and app
 CREATE TABLE "connections" (
   "id" UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  "user_id" UUID NOT NULL,
   "company_id" UUID NOT NULL,
   "app_id" UUID NOT NULL,
   "access_token" TEXT NOT NULL,
@@ -68,6 +69,8 @@ CREATE TABLE "connections" (
   "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   "updated_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   "deleted_at" TIMESTAMP WITH TIME ZONE,
+  CONSTRAINT "fk_connections_user_id" 
+    FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE,
   CONSTRAINT "fk_connections_company_id" 
     FOREIGN KEY ("company_id") REFERENCES "companies" ("id") ON DELETE CASCADE,
   CONSTRAINT "fk_connections_app_id" 
@@ -191,6 +194,7 @@ CREATE INDEX "idx_apps_type" ON "apps" ("type");
 CREATE INDEX "idx_apps_is_active" ON "apps" ("is_active");
 CREATE INDEX "idx_apps_deleted_at" ON "apps" ("deleted_at");
 
+CREATE INDEX "idx_connections_user_id" ON "connections" ("user_id");
 CREATE INDEX "idx_connections_company_id" ON "connections" ("company_id");
 CREATE INDEX "idx_connections_app_id" ON "connections" ("app_id");
 CREATE INDEX "idx_connections_is_active" ON "connections" ("is_active");

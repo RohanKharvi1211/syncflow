@@ -1,9 +1,22 @@
 -- Seed initial apps with their metadata schemas
 -- This migration populates the apps table with common applications
+-- This migration is idempotent - it checks if the apps table exists first
+
+DO $$
+BEGIN
+    -- Check if apps table exists
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_name = 'apps'
+    ) THEN
+        RAISE NOTICE 'Apps table does not exist. Skipping app seeding.';
+        RETURN;
+    END IF;
+END $$;
 
 -- Google Sheets App (source)
-INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") VALUES
-(
+INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") 
+SELECT
   uuid_generate_v4(),
   'googlesheet',
   'Google Sheets',
@@ -20,11 +33,11 @@ INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metada
     }
   }'::jsonb,
   true
-);
+WHERE NOT EXISTS (SELECT 1 FROM "apps" WHERE "name" = 'googlesheet');
 
 -- Salesforce App (source and destination)
-INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") VALUES
-(
+INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") 
+SELECT
   uuid_generate_v4(),
   'salesforce',
   'Salesforce',
@@ -41,11 +54,11 @@ INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metada
     }
   }'::jsonb,
   true
-);
+WHERE NOT EXISTS (SELECT 1 FROM "apps" WHERE "name" = 'salesforce');
 
 -- QuickBooks App (source and destination)
-INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") VALUES
-(
+INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") 
+SELECT
   uuid_generate_v4(),
   'quickbooks',
   'QuickBooks',
@@ -60,11 +73,11 @@ INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metada
     }
   }'::jsonb,
   true
-);
+WHERE NOT EXISTS (SELECT 1 FROM "apps" WHERE "name" = 'quickbooks');
 
 -- Tally App (destination)
-INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") VALUES
-(
+INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") 
+SELECT
   uuid_generate_v4(),
   'tally',
   'Tally',
@@ -82,11 +95,11 @@ INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metada
     }
   }'::jsonb,
   true
-);
+WHERE NOT EXISTS (SELECT 1 FROM "apps" WHERE "name" = 'tally');
 
 -- Google Drive App (source)
-INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") VALUES
-(
+INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metadata_schema", "is_active") 
+SELECT
   uuid_generate_v4(),
   'googledrive',
   'Google Drive',
@@ -103,7 +116,7 @@ INSERT INTO "apps" ("id", "name", "display_name", "description", "type", "metada
     }
   }'::jsonb,
   true
-);
+WHERE NOT EXISTS (SELECT 1 FROM "apps" WHERE "name" = 'googledrive');
 
 
 
